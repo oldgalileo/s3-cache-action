@@ -3,7 +3,6 @@ import * as glob from "@actions/glob";
 import * as s3 from "@aws-sdk/client-s3";
 import * as crypto from "crypto";
 import * as tar from "tar";
-import * as lzma from "lzma-native";
 import { pipeline } from "stream/promises";
 
 import { Client } from "./client";
@@ -40,13 +39,12 @@ export async function saveCache(
 
   core.debug(`Creating, compressing, and uploading cache...`);
   
-  const compressStream = lzma.createCompressor();
-  const tarStream = tar.create({ preservePaths: true }, expandedPaths);
+  const tarStream = tar.create({ gzip: true, preservePaths: true }, expandedPaths);
   const trackedUploadStream = new BandwidthTrackedStream();
 
   const upload = client.putObjectStream(key, file, trackedUploadStream);
 
-  const pipelinePromise = pipeline(tarStream, compressStream, trackedUploadStream);
+  const pipelinePromise = pipeline(tarStream, trackedUploadStream);
   const uploadPromise = upload.done();
 
   await Promise.all([pipelinePromise, uploadPromise]);
@@ -96,10 +94,9 @@ export async function restoreCache(
     core.debug(`Receiving, decompressing, and extracting cache...`);
     const objectStream = await client.getObjectStream(key, file);
     const trackedStream = new BandwidthTrackedStream();
-    const decompressStream = lzma.createDecompressor();
     const extractStream = tar.extract({ preservePaths: true });
 
-    await pipeline(objectStream, trackedStream, decompressStream, extractStream);
+    await pipeline(objectStream, trackedStream, extractStream);
 
     core.info(`Cache restored from S3 with key ${restoredKey}, ${trackedStream.getTotalBytes()} bytes.`);
   }
